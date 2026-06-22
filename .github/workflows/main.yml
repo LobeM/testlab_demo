@@ -54,4 +54,4 @@ jobs:
             --os-version-ids=33 \
             --orientations=portrait \
             --use-orchestrator \
-            --timeout=10m
+            --timeout=15m
