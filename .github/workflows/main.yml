@@ -1,0 +1,57 @@
+name: integrationTest
+
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  integrationTest:
+    name: integration Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: "17"
+          cache: gradle
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter tests
+        run: flutter test
+
+      - name: Generate apk for testlab
+        run: |
+          pushd android
+          flutter build apk
+          ./gradlew app:assembleAndroidTest
+          ./gradlew app:assembleDebug -Ptarget="integration_test/app_test.dart"
+          popd
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: testlab-demo-f6fda
+
+      - name: Download gcloud config json file
+        id: gcloud_config
+        uses: timheuer/base64-to-file@v1.2
+        with:
+          fileName: integration_test_gcloud.json
+          encodedString: ${{ secrets.INTEGRATION_TEST_GCLOUD_CONFIG }}
+
+      - name: Configure the gcloud account
+        run: |
+          gcloud auth activate-service-account --key-file="${{ steps.gcloud_config.outputs.filePath }}"
+          gcloud firebase test android run --type=instrumentation \
+            --app "build/app/outputs/apk/debug/app-debug.apk" \
+            --test "build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk" \
+            --device-ids=MediumPhone.arm \
+            --os-version-ids=33 \
+            --orientations=portrait \
+            --use-orchestrator \
+            --timeout=3m
