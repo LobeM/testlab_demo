@@ -4,10 +4,13 @@ on:
   push:
     branches: ["main"]
 
+env:
+  FIREBASE_PROJECT: testlab-demo-f6fda
+
 jobs:
   integrationTest:
     name: integration Test
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -22,36 +25,43 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Get flutter packages
+        run: flutter pub get
+
       - name: Flutter tests
         run: flutter test
 
-      - name: Generate apk for testlab
+      - name: Build APK
+        run: flutter build apk --debug
+
+      - name: Create debug and test APK
         run: |
-          pushd android
-          flutter build apk
+          set -ex
+          cd android
           ./gradlew app:assembleAndroidTest
-          ./gradlew app:assembleDebug -Ptarget="integration_test/app_test.dart"
-          popd
+          ./gradlew app:assembleDebug -Ptarget="$GITHUB_WORKSPACE/integration_test/app_test.dart"
 
       - uses: google-github-actions/setup-gcloud@v2
-        with:
-          project_id: testlab-demo-f6fda
-
-      - name: Download gcloud config json file
-        id: gcloud_config
-        uses: timheuer/base64-to-file@v1.2
-        with:
-          fileName: integration_test_gcloud.json
-          encodedString: ${{ secrets.INTEGRATION_TEST_GCLOUD_CONFIG }}
-
-      - name: Configure the gcloud account
+      - name: Run Firebase Test Lab Tests
         run: |
-          gcloud auth activate-service-account --key-file="${{ steps.gcloud_config.outputs.filePath }}"
-          gcloud firebase test android run --type=instrumentation \
-            --app "build/app/outputs/apk/debug/app-debug.apk" \
-            --test "build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk" \
-            --device-ids=MediumPhone.arm \
-            --os-version-ids=33 \
-            --orientations=portrait \
-            --use-orchestrator \
-            --timeout=15m
+          set -ex
+          echo "$INTEGRATION_TEST_GCLOUD_CONFIG" | base64 -d > ./gcloud_key_file.json
+          gcloud auth activate-service-account --key-file=./gcloud_key_file.json
+          gcloud --quiet config set project $FIREBASE_PROJECT
+          gcloud firebase test android run \
+            --type instrumentation \
+            --app build/app/outputs/apk/debug/app-debug.apk \
+            --test build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
+            --timeout 3m
+        env:
+          INTEGRATION_TEST_GCLOUD_CONFIG: ${{ secrets.INTEGRATION_TEST_GCLOUD_CONFIG }}
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-outputs
+          path: |
+            build/**/outputs/**/*.apk
+            build/**/outputs/**/*.aab
+            build/**/outputs/**/mapping.txt
+            flutter_drive.log
